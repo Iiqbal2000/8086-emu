@@ -1,10 +1,15 @@
 #include <stdint.h>
 #include <stdio.h>
 
-int main(void) {
+int main(int argc, char *argv[]) {
+  if (argc == 1) {
+    printf("Need an argument!\n");
+    return 0;
+  }
+
   FILE *file;
 
-  file = fopen("many_register_mov", "rb");
+  file = fopen(argv[1], "rb");
 
   // little-endian byte order
   uint16_t instruction;
