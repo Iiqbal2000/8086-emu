@@ -135,12 +135,12 @@ int main(int argc, char *argv[]) {
             printf("mov [%s], %s\n",
                    get_memory_addressing(mod, r_m, disp_bytes), get_register(reg, w_bit));
         }
+
+        free(disp_bytes);
       }
 
     } else if ((instruction & 0b11110000) >> 4 == 0b1011) {
       // extract high 4 bits
-      // opcode = (instruction & 0b11110000) >> 4;
-      // print_bit(opcode);
       uint8_t w_bit = (instruction & 0b00001000) >> 3;
       uint8_t reg = instruction & 0b00000111;
 
