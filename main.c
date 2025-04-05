@@ -264,8 +264,6 @@ int main(int argc, char *argv[]) {
         read_byte(&disp_lo, file);
         read_byte(&disp_hi, file);
 
-        char *addr_str;
-
         int16_t disp16 = (int16_t)((disp_hi << 8) | disp_lo);
         printf("mov [%d], ax\n", disp16);
     }
