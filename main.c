@@ -26,13 +26,20 @@ size_t read_byte(uint8_t *buffer, FILE *file) {
 }
 
 const char *get_register(uint8_t reg, uint8_t w_bit) {
-    return w_bit ? reg_in_word[reg] : reg_in_byte[reg];
+  return w_bit ? reg_in_word[reg] : reg_in_byte[reg];
 }
 
 char *get_memory_addressing(uint8_t mod, uint8_t r_m, uint8_t *disp_bytes) {
   char *addr_str;
   if (mod == 0b00) {
-    addr_str = strdup(reg_mem_map[r_m]);
+    if (r_m != 0b110) {
+        addr_str = strdup(reg_mem_map[r_m]);
+    } else {
+        int16_t disp16 = (int16_t)((disp_bytes[1] << 8) | disp_bytes[0]);
+        int size = snprintf(NULL, 0, "%d", abs(disp16));
+        addr_str = malloc(size + 1);
+        snprintf(addr_str, size + 1, "%d", abs(disp16));
+    }
   } else if (mod == 0b01) {
     int8_t disp8 = (int8_t)disp_bytes[0];
     int size = snprintf(NULL, 0, "%s %s %d", reg_mem_map[r_m],
@@ -88,58 +95,65 @@ int main(int argc, char *argv[]) {
 
       const char *reg_name = get_register(reg, w_bit);
 
-      // register mode
       if (mod == 0b11) {
         const char *src = d_bit ? get_register(r_m, w_bit) : reg_name;
         const char *dst = d_bit ? reg_name : get_register(r_m, w_bit);
         printf("mov %s, %s\n", dst, src);
-
       } else if (mod == 0b00) {
-        if (d_bit == 0b1) {
-            printf("mov %s, [%s]\n",
-                   get_register(reg, w_bit), get_memory_addressing(mod, r_m, NULL));
-        } else {
-            printf("mov [%s], %s\n",
-                   get_memory_addressing(mod, r_m, NULL), get_register(reg, w_bit));
+        uint8_t *disp_bytes = malloc(sizeof(uint8_t) * 2);
+          if (r_m == 0b110) {
+            uint8_t disp_lo, disp_hi;
+            read_byte(&disp_lo, file);
+            read_byte(&disp_hi, file);
+
+            disp_bytes[0] = disp_lo;
+            disp_bytes[1] = disp_hi;
         }
+        if (d_bit == 0b1) {
+          printf("mov %s, [%s]\n", get_register(reg, w_bit),
+                 get_memory_addressing(mod, r_m, disp_bytes));
+        } else {
+          printf("mov [%s], %s\n", get_memory_addressing(mod, r_m, disp_bytes),
+                 get_register(reg, w_bit));
+        }
+
+        free(disp_bytes);
       } else if (mod == 0b01) { // displacement 8 bit
-        read_byte(&instruction, file);
-        uint8_t disp_lo = instruction;
+        uint8_t disp_lo;
+        read_byte(&disp_lo, file);
         uint8_t *disp_bytes = malloc(sizeof(uint8_t));
         disp_bytes[0] = disp_lo;
 
         if (d_bit == 0b1) {
-            printf("mov %s, [%s]\n",
-                   get_register(reg, w_bit), get_memory_addressing(mod, r_m, disp_bytes));
+          printf("mov %s, [%s]\n", get_register(reg, w_bit),
+                 get_memory_addressing(mod, r_m, disp_bytes));
         } else {
-            printf("mov [%s], %s\n",
-                   get_memory_addressing(mod, r_m, disp_bytes), get_register(reg, w_bit));
+          printf("mov [%s], %s\n", get_memory_addressing(mod, r_m, disp_bytes),
+                 get_register(reg, w_bit));
         }
 
         free(disp_bytes);
-
       } else if (mod == 0b10) {
-        read_byte(&instruction, file);
-        uint8_t disp_lo = instruction;
-        read_byte(&instruction, file);
-        uint8_t disp_hi = instruction;
+        uint8_t disp_lo, disp_hi;
+        read_byte(&disp_lo, file);
+        read_byte(&disp_hi, file);
 
         uint8_t *disp_bytes = malloc(sizeof(uint8_t) * 2);
         disp_bytes[0] = disp_lo;
         disp_bytes[1] = disp_hi;
 
         if (d_bit == 0b1) {
-            printf("mov %s, [%s]\n",
-                   get_register(reg, w_bit), get_memory_addressing(mod, r_m, disp_bytes));
+          printf("mov %s, [%s]\n", get_register(reg, w_bit),
+                 get_memory_addressing(mod, r_m, disp_bytes));
         } else {
-            printf("mov [%s], %s\n",
-                   get_memory_addressing(mod, r_m, disp_bytes), get_register(reg, w_bit));
+          printf("mov [%s], %s\n", get_memory_addressing(mod, r_m, disp_bytes),
+                 get_register(reg, w_bit));
         }
 
         free(disp_bytes);
       }
 
-    } else if ((instruction & 0b11110000) >> 4 == 0b1011) {
+    } else if ((instruction & 0b11110000) >> 4 == 0b1011) { // immediate to register
       // extract high 4 bits
       uint8_t w_bit = (instruction & 0b00001000) >> 3;
       uint8_t reg = instruction & 0b00000111;
@@ -159,6 +173,101 @@ int main(int argc, char *argv[]) {
 
         printf("mov %s, %d\n", reg_in_byte[reg], instruction);
       }
+    } else if ((instruction & 0b11111110) >> 1 == 0b1100011) {
+        uint8_t w_bit = instruction & 0b00000001;
+        read_byte(&instruction, file);
+        // 2 bit for mod
+        uint8_t mod = (instruction & 0b11000000) >> 6;
+        // 3 bit for r_m
+        uint8_t r_m = (instruction & 0b00000111);
+
+        if (mod == 0b00) {
+            if (w_bit == 0b0) {
+                uint8_t data_byte;
+                read_byte(&data_byte, file);
+                printf("mov [%s], byte %d\n", get_memory_addressing(mod, r_m, NULL),
+                    data_byte);
+            } else {
+                uint8_t data_lo, data_hi;
+                read_byte(&data_lo, file);
+                read_byte(&data_hi, file);
+
+                int16_t data_word = (int16_t)((data_hi << 8) | data_lo);
+                printf("mov [%s], word %d\n", get_memory_addressing(mod, r_m, NULL),
+                       data_word);
+
+            }
+        } else if (mod == 0b01) {
+            uint8_t disp_lo;
+            read_byte(&disp_lo, file);
+            uint8_t *disp_bytes = malloc(sizeof(uint8_t));
+            disp_bytes[0] = disp_lo;
+
+            if (w_bit == 0b0) {
+                uint8_t data_byte;
+                read_byte(&data_byte, file);
+                printf("mov [%s], byte %d\n", get_memory_addressing(mod, r_m, disp_bytes),
+                    data_byte);
+            } else {
+                uint8_t data_lo, data_hi;
+                read_byte(&data_lo, file);
+                read_byte(&data_hi, file);
+
+                int16_t data_word = (int16_t)((data_hi << 8) | data_lo);
+                printf("mov [%s], word %d\n", get_memory_addressing(mod, r_m, disp_bytes),
+                       data_word);
+            }
+
+            free(disp_bytes);
+        } else if (mod == 0b10) {
+            uint8_t disp_lo, disp_hi;
+            read_byte(&disp_lo, file);
+            read_byte(&disp_hi, file);
+
+            uint8_t *disp_bytes = malloc(sizeof(uint8_t) * 2);
+            disp_bytes[0] = disp_lo;
+            disp_bytes[1] = disp_hi;
+
+            if (w_bit == 0b0) {
+                uint8_t data_byte;
+                read_byte(&data_byte, file);
+                printf("mov [%s], byte %d\n", get_memory_addressing(mod, r_m, disp_bytes),
+                    data_byte);
+            } else {
+                uint8_t data_lo, data_hi;
+                read_byte(&data_lo, file);
+                read_byte(&data_hi, file);
+
+                int16_t data_word = (int16_t)((data_hi << 8) | data_lo);
+                printf("mov [%s], word %d\n", get_memory_addressing(mod, r_m, disp_bytes),
+                       data_word);
+            }
+
+            free(disp_bytes);
+        }
+
+    } else if ((instruction & 0b11111110) >> 1 == 0b1010000) {
+        uint8_t w_bit = instruction & 0b00000001;
+
+        uint8_t disp_lo, disp_hi;
+        read_byte(&disp_lo, file);
+        read_byte(&disp_hi, file);
+
+        char *addr_str;
+
+        int16_t disp16 = (int16_t)((disp_hi << 8) | disp_lo);
+        printf("mov ax, [%d]\n", disp16);
+    } else if ((instruction & 0b11111110) >> 1 == 0b1010001) {
+        uint8_t w_bit = instruction & 0b00000001;
+
+        uint8_t disp_lo, disp_hi;
+        read_byte(&disp_lo, file);
+        read_byte(&disp_hi, file);
+
+        char *addr_str;
+
+        int16_t disp16 = (int16_t)((disp_hi << 8) | disp_lo);
+        printf("mov [%d], ax\n", disp16);
     }
   }
 
